@@ -281,12 +281,16 @@
 
     <section id="evaluatorPanel" class="panel">
       <div class="print-only"><h1>Synthèse du positionnement de prévisite</h1><p id="printIdentity"></p></div>
-      <div class="card">
-        <h2>Espace évaluateur</h2>
-        <p>Les réponses objectives sont pré-corrigées. L’évaluateur attribue les scores définitifs après lecture des productions et observation de la mise en pratique.</p>
-        <div class="lock screen-only"><label for="evaluatorCode">Code d’accès évaluateur</label><div class="inline"><input class="short" id="evaluatorCode" type="password" inputmode="numeric"><button type="button" class="primary" id="unlock">Ouvrir l’évaluation</button></div><p class="small">Code initial : 2046. Il sert seulement à éviter l’ouverture accidentelle par le candidat ; ce n’est pas une protection de sécurité.</p></div>
+      <div class="card screen-only" id="trainerLockCard">
+        <h2>Espace formateur</h2>
+        <p>Cette rubrique est réservée au formateur. Saisissez le code d’accès pour afficher les dossiers, les réponses, les résultats et les règles de positionnement.</p>
+        <div class="lock"><label for="evaluatorCode">Code d’accès formateur</label><div class="inline"><input class="short" id="evaluatorCode" type="password" inputmode="numeric" autocomplete="off"><button type="button" class="primary" id="unlock">Ouvrir l’espace formateur</button></div><p class="small muted" id="lockMessage">Aucune donnée d’évaluation n’est visible avant le déverrouillage.</p></div>
       </div>
       <div id="evaluationContent" hidden>
+        <div class="card">
+          <h2>Espace évaluateur</h2>
+          <p>Les réponses objectives sont pré-corrigées. L’évaluateur attribue les scores définitifs après lecture des productions et observation de la mise en pratique.</p>
+        </div>
         <div class="card screen-only">
           <h2>Dossiers enregistrés</h2>
           <p class="small muted">Chaque passation terminée reste disponible sur cet ordinateur. Pour un archivage durable ou un transfert vers un autre poste, exportez le dossier au format JSON.</p>
@@ -379,6 +383,7 @@
     let timerState={startedAt:null,completedAt:null,accumulatedMs:0,runningSince:null};
     let currentDossierId=null;
     let resetting=false;
+    let trainerUnlocked=false;
     let candidatePages=[],currentPage=0;
     $('#practiceRows').innerHTML=actions.map((a,i)=>`<tr><td>${a}</td><td><select id="p${i+1}" data-save data-eval><option value="0">Non réalisé</option><option value="1">Avec accompagnement</option><option value="2">Dans une situation connue</option><option value="3">En autonomie</option></select></td></tr>`).join('');
 
@@ -403,7 +408,17 @@
     $('#fontPlus').onclick=()=>{let n=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--font'))||18;n=Math.min(24,n+2);document.documentElement.style.setProperty('--font',n+'px')};
     $('#fontMinus').onclick=()=>{let n=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--font'))||18;n=Math.max(14,n-2);document.documentElement.style.setProperty('--font',n+'px')};
     $('#contrast').onclick=()=>document.body.classList.toggle('contrast');
-    $$('.tab').forEach(b=>b.onclick=()=>{$$('.tab').forEach(x=>x.classList.remove('active'));$$('.panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.panel).classList.add('active');if(b.dataset.panel==='candidatePanel')showCandidatePage(currentPage,true);else window.scrollTo(0,0)});
+    $$('.tab').forEach(b=>b.onclick=()=>{
+      let target=b.dataset.panel;
+      if(!trainerUnlocked&&(target==='evaluatorPanel'||target==='guidePanel'))target='evaluatorPanel';
+      $$('.tab').forEach(x=>x.classList.remove('active'));
+      $$('.panel').forEach(x=>x.classList.remove('active'));
+      const activeTab=$(`.tab[data-panel="${target}"]`);
+      if(activeTab)activeTab.classList.add('active');
+      $('#'+target).classList.add('active');
+      if(target==='candidatePanel')showCandidatePage(currentPage,true);else window.scrollTo(0,0);
+      if(!trainerUnlocked&&target==='evaluatorPanel')setTimeout(()=>$('#evaluatorCode').focus(),0);
+    });
     function elapsedMs(){return Math.max(0,(timerState.accumulatedMs||0)+(timerState.runningSince?Date.now()-new Date(timerState.runningSince).getTime():0))}
     function formatDuration(ms){const s=Math.floor(Math.max(0,ms)/1000),h=Math.floor(s/3600),m=Math.floor((s%3600)/60),r=s%60;return [h,m,r].map(x=>String(x).padStart(2,'0')).join(':')}
     function formatDate(iso){return iso?new Date(iso).toLocaleString('fr-FR',{dateStyle:'short',timeStyle:'medium'}):'Non renseigné'}
@@ -412,8 +427,34 @@
     function pauseTimer(saveNow=true){if(timerState.runningSince){timerState.accumulatedMs=elapsedMs();timerState.runningSince=null}if(saveNow)save(false);else updateTimerUI()}
     $('#startTimer').onclick=startTimer;
     $('#pauseTimer').onclick=()=>pauseTimer(true);
-    $('#finishCandidate').onclick=()=>{if(!timerState.startedAt)timerState.startedAt=new Date().toISOString();pauseTimer(false);timerState.completedAt=new Date().toISOString();autoCorrectAll(true);archiveDossier(true);save(false);alert('La passation est terminée. Les réponses, le temps actif et la pré-correction sont enregistrés dans l’espace évaluateur.');$$('.tab')[1].click()};
-    $('#unlock').onclick=()=>{if($('#evaluatorCode').value==='2046'){ $('#evaluationContent').hidden=false; compute();renderAutoCorrection();renderAnswers();renderDossierList();updateTimerUI(); } else alert('Code incorrect.')};
+    $('#finishCandidate').onclick=()=>{
+      if(!timerState.startedAt)timerState.startedAt=new Date().toISOString();
+      pauseTimer(false);
+      timerState.completedAt=new Date().toISOString();
+      autoCorrectAll(true);
+      archiveDossier(false);
+      resetting=true;
+      localStorage.removeItem(KEY);
+      localStorage.removeItem(OLD_KEY);
+      localStorage.removeItem(PAGE_KEY);
+      currentDossierId=null;
+      alert('La passation est terminée. Le dossier, les réponses, le temps actif et les résultats sont enregistrés dans l’espace évaluateur. Le formulaire va maintenant être remis à zéro pour la personne suivante.');
+      location.reload();
+    };
+    function unlockTrainer(){
+      if($('#evaluatorCode').value!=='91102026'){
+        $('#evaluatorCode').value='';
+        $('#lockMessage').textContent='Code incorrect. L’espace formateur reste verrouillé.';
+        $('#evaluatorCode').focus();
+        return;
+      }
+      trainerUnlocked=true;
+      $('#trainerLockCard').hidden=true;
+      $('#evaluationContent').hidden=false;
+      compute();renderAutoCorrection();renderAnswers();renderDossierList();updateTimerUI();
+    }
+    $('#unlock').onclick=unlockTrainer;
+    $('#evaluatorCode').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();unlockTrainer()}});
 
     function answerMatch(value,expected){const v=String(value||'').trim(),e=String(expected||'').trim();if(!v)return false;if(e.includes(',')){const wanted=e.split(',').map(x=>x.trim());if(wanted.every(x=>/^-?\d+(?:\.\d+)?$/.test(x))){const allPositive=wanted.every(x=>Number(x)>=0);const pattern=allPositive?/\d+(?:[.,]\d+)?/g:/-?\d+(?:[.,]\d+)?/g;const got=(v.match(pattern)||[]).map(x=>Number(x.replace(',','.')));return got.length===wanted.length&&got.every((x,i)=>Math.abs(x-Number(wanted[i]))<0.0001)}const pv=plain(v);let pos=-1;return wanted.every(x=>{const next=pv.indexOf(plain(x),pos+1);if(next<0)return false;pos=next;return true})}if(/^-?\d+(?:\.\d+)?$/.test(e)){const got=Number(v.replace(',','.').replace(/[^0-9.-]/g,''));return Number.isFinite(got)&&Math.abs(got-Number(e))<0.0001}return plain(v)===plain(e)}
     function objective(group){const els=$$(`[data-math="${group}"]`);let ok=0;els.forEach(el=>{const v=el.type==='radio'?(el.checked?el.value:''):el.value;if(answerMatch(v,el.dataset.answer))ok++});return {ok,total:els.length,pct:els.length?ok/els.length:0}}
